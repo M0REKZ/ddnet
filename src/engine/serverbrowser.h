@@ -3,15 +3,19 @@
 #ifndef ENGINE_SERVERBROWSER_H
 #define ENGINE_SERVERBROWSER_H
 
-#include <base/types.h>
+#include <base/hash.h>
+#include <base/system.h>
+
 #include <engine/map.h>
 #include <engine/shared/protocol.h>
 
 #include "kernel.h"
 
+#include <unordered_set>
 #include <vector>
 
-#define DDNET_INFO "ddnet-info.json"
+static constexpr const char *DDNET_INFO_FILE = "ddnet-info.json";
+static constexpr const char *DDNET_INFO_URL = "https://info.ddnet.org/info";
 
 class CUIElement;
 
@@ -48,6 +52,13 @@ public:
 		RANK_UNAVAILABLE,
 		RANK_RANKED,
 		RANK_UNRANKED,
+	};
+
+	enum
+	{
+		MAX_COMMUNITY_ID_LENGTH = 32,
+		MAX_COMMUNITY_COUNTRY_LENGTH = 32,
+		MAX_COMMUNITY_TYPE_LENGTH = 32,
 	};
 
 	class CClient
@@ -90,7 +101,9 @@ public:
 	EClientScoreKind m_ClientScoreKind;
 	TRISTATE m_Favorite;
 	TRISTATE m_FavoriteAllowPing;
-	bool m_Official;
+	char m_aCommunityId[MAX_COMMUNITY_ID_LENGTH];
+	char m_aCommunityCountry[MAX_COMMUNITY_COUNTRY_LENGTH];
+	char m_aCommunityType[MAX_COMMUNITY_TYPE_LENGTH];
 	int m_Location;
 	bool m_LatencyIsEstimated;
 	int m_Latency; // in ms
@@ -113,7 +126,7 @@ public:
 class CCommunityCountryServer
 {
 	NETADDR m_Address;
-	char m_aTypeName[32];
+	char m_aTypeName[CServerInfo::MAX_COMMUNITY_TYPE_LENGTH];
 
 public:
 	CCommunityCountryServer(NETADDR Address, const char *pTypeName) :
@@ -130,7 +143,7 @@ class CCommunityCountry
 {
 	friend class CServerBrowser;
 
-	char m_aName[256];
+	char m_aName[CServerInfo::MAX_COMMUNITY_COUNTRY_LENGTH];
 	int m_FlagId;
 	std::vector<CCommunityCountryServer> m_vServers;
 
@@ -148,7 +161,7 @@ public:
 
 class CCommunityType
 {
-	char m_aName[32];
+	char m_aName[CServerInfo::MAX_COMMUNITY_TYPE_LENGTH];
 
 public:
 	CCommunityType(const char *pName)
@@ -159,34 +172,84 @@ public:
 	const char *Name() const { return m_aName; }
 };
 
+class CCommunityMap
+{
+	char m_aName[MAX_MAP_LENGTH];
+
+public:
+	CCommunityMap(const char *pName)
+	{
+		str_copy(m_aName, pName);
+	}
+
+	const char *Name() const { return m_aName; }
+
+	bool operator==(const CCommunityMap &Other) const
+	{
+		return str_comp(Name(), Other.Name()) == 0;
+	}
+
+	bool operator!=(const CCommunityMap &Other) const
+	{
+		return !(*this == Other);
+	}
+
+	struct SHash
+	{
+		size_t operator()(const CCommunityMap &Map) const
+		{
+			return str_quickhash(Map.Name());
+		}
+	};
+};
+
 class CCommunity
 {
 	friend class CServerBrowser;
 
-	char m_aId[32];
+	char m_aId[CServerInfo::MAX_COMMUNITY_ID_LENGTH];
 	char m_aName[64];
-	char m_aJsonServersKey[32];
+	SHA256_DIGEST m_IconSha256;
+	char m_aIconUrl[128];
 	std::vector<CCommunityCountry> m_vCountries;
 	std::vector<CCommunityType> m_vTypes;
+	bool m_HasFinishes = false;
+	std::unordered_set<CCommunityMap, CCommunityMap::SHash> m_FinishedMaps;
 
 public:
-	CCommunity(const char *pId, const char *pName, const char *pJsonServersKey)
+	CCommunity(const char *pId, const char *pName, SHA256_DIGEST IconSha256, const char *pIconUrl) :
+		m_IconSha256(IconSha256)
 	{
 		str_copy(m_aId, pId);
 		str_copy(m_aName, pName);
-		str_copy(m_aJsonServersKey, pJsonServersKey);
+		str_copy(m_aIconUrl, pIconUrl);
 	}
 
 	const char *Id() const { return m_aId; }
 	const char *Name() const { return m_aName; }
-	const char *JsonServersKey() const { return m_aJsonServersKey; }
+	const char *IconUrl() const { return m_aIconUrl; }
+	const SHA256_DIGEST &IconSha256() const { return m_IconSha256; }
 	const std::vector<CCommunityCountry> &Countries() const { return m_vCountries; }
 	const std::vector<CCommunityType> &Types() const { return m_vTypes; }
+	bool HasCountry(const char *pCountryName) const;
+	bool HasType(const char *pTypeName) const;
+	bool HasRanks() const { return m_HasFinishes; }
+	CServerInfo::ERankState HasRank(const char *pMap) const;
+};
+
+class IFilterList
+{
+public:
+	virtual void Add(const char *pElement) = 0;
+	virtual void Remove(const char *pElement) = 0;
+	virtual void Clear() = 0;
+	virtual bool Empty() const = 0;
+	virtual bool Filtered(const char *pElement) const = 0;
 };
 
 class IServerBrowser : public IInterface
 {
-	MACRO_INTERFACE("serverbrowser", 0)
+	MACRO_INTERFACE("serverbrowser")
 public:
 	/* Constants: Server Browser Sorting
 		SORT_NAME - Sort by name.
@@ -210,21 +273,18 @@ public:
 		TYPE_INTERNET = 0,
 		TYPE_LAN,
 		TYPE_FAVORITES,
-		TYPE_DDNET,
-		TYPE_KOG,
+		TYPE_FAVORITE_COMMUNITY_1,
+		TYPE_FAVORITE_COMMUNITY_2,
+		TYPE_FAVORITE_COMMUNITY_3,
 		NUM_TYPES,
-
-		// TODO: remove integer community index and used string IDs instead
-		NETWORK_DDNET = 0,
-		NETWORK_KOG = 1,
-		NUM_NETWORKS,
 	};
 
 	static constexpr const char *COMMUNITY_DDNET = "ddnet";
+	static constexpr const char *COMMUNITY_NONE = "none";
 
 	static constexpr const char *SEARCH_EXCLUDE_TOKEN = ";";
 
-	virtual void Refresh(int Type) = 0;
+	virtual void Refresh(int Type, bool Force = false) = 0;
 	virtual bool IsGettingServerlist() const = 0;
 	virtual bool IsRefreshing() const = 0;
 	virtual int LoadingProgression() const = 0;
@@ -240,12 +300,24 @@ public:
 
 	virtual const std::vector<CCommunity> &Communities() const = 0;
 	virtual const CCommunity *Community(const char *pCommunityId) const = 0;
+	virtual std::vector<const CCommunity *> SelectedCommunities() const = 0;
+	virtual std::vector<const CCommunity *> FavoriteCommunities() const = 0;
+	virtual std::vector<const CCommunity *> CurrentCommunities() const = 0;
+	virtual unsigned CurrentCommunitiesHash() const = 0;
 
-	virtual void DDNetFilterAdd(char *pFilter, int FilterSize, const char *pName) const = 0;
-	virtual void DDNetFilterRem(char *pFilter, int FilterSize, const char *pName) const = 0;
-	virtual bool DDNetFiltered(const char *pFilter, const char *pName) const = 0;
-	virtual void CountryFilterClean(int CommunityIndex) = 0;
-	virtual void TypeFilterClean(int CommunityIndex) = 0;
+	virtual bool DDNetInfoAvailable() const = 0;
+	virtual SHA256_DIGEST DDNetInfoSha256() const = 0;
+
+	virtual IFilterList &FavoriteCommunitiesFilter() = 0;
+	virtual IFilterList &CommunitiesFilter() = 0;
+	virtual IFilterList &CountriesFilter() = 0;
+	virtual IFilterList &TypesFilter() = 0;
+	virtual const IFilterList &FavoriteCommunitiesFilter() const = 0;
+	virtual const IFilterList &CommunitiesFilter() const = 0;
+	virtual const IFilterList &CountriesFilter() const = 0;
+	virtual const IFilterList &TypesFilter() const = 0;
+	virtual void CleanFilters() = 0;
+
 	virtual int GetCurrentType() = 0;
 	virtual const char *GetTutorialServer() = 0;
 };

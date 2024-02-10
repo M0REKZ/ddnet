@@ -36,7 +36,8 @@ struct CSoundSource_DEPRECATED
 bool CEditorMap::Save(const char *pFileName)
 {
 	char aFileNameTmp[IO_MAX_PATH_LENGTH];
-	str_format(aFileNameTmp, sizeof(aFileNameTmp), "%s.%d.tmp", pFileName, pid());
+	IStorage::FormatTmpPath(aFileNameTmp, sizeof(aFileNameTmp), pFileName);
+
 	char aBuf[IO_MAX_PATH_LENGTH + 64];
 	str_format(aBuf, sizeof(aBuf), "saving to '%s'...", aFileNameTmp);
 	m_pEditor->Console()->Print(IConsole::OUTPUT_LEVEL_STANDARD, "editor", aBuf);
@@ -146,6 +147,7 @@ bool CEditorMap::Save(const char *pFileName)
 		Item.m_External = 0;
 		Item.m_SoundName = Writer.AddDataString(pSound->m_aName);
 		Item.m_SoundData = Writer.AddData(pSound->m_DataSize, pSound->m_pData);
+		// Value is not read in new versions, but we still need to write it for compatibility with old versions.
 		Item.m_SoundDataSize = pSound->m_DataSize;
 
 		Writer.AddItem(MAPITEMTYPE_SOUND, i, sizeof(Item), &Item);
@@ -505,7 +507,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 					pImg->m_Height = ImgInfo.m_Height;
 					pImg->m_Format = ImgInfo.m_Format;
 					pImg->m_pData = ImgInfo.m_pData;
-					int TextureLoadFlag = m_pEditor->Graphics()->HasTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
+					int TextureLoadFlag = m_pEditor->Graphics()->Uses2DTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
 					if(ImgInfo.m_Width % 16 != 0 || ImgInfo.m_Height % 16 != 0)
 						TextureLoadFlag = 0;
 					pImg->m_Texture = m_pEditor->Graphics()->LoadTextureRaw(ImgInfo.m_Width, ImgInfo.m_Height, ImgInfo.m_Format, ImgInfo.m_pData, TextureLoadFlag, aBuf);
@@ -524,7 +526,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 				const size_t DataSize = (size_t)pImg->m_Width * pImg->m_Height * CImageInfo::PixelSize(Format);
 				pImg->m_pData = malloc(DataSize);
 				mem_copy(pImg->m_pData, pData, DataSize);
-				int TextureLoadFlag = m_pEditor->Graphics()->HasTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
+				int TextureLoadFlag = m_pEditor->Graphics()->Uses2DTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
 				if(pImg->m_Width % 16 != 0 || pImg->m_Height % 16 != 0)
 					TextureLoadFlag = 0;
 				pImg->m_Texture = m_pEditor->Graphics()->LoadTextureRaw(pImg->m_Width, pImg->m_Height, pImg->m_Format, pImg->m_pData, TextureLoadFlag);
@@ -575,9 +577,7 @@ bool CEditorMap::Load(const char *pFileName, int StorageType, const std::functio
 			}
 			else
 			{
-				pSound->m_DataSize = pItem->m_SoundDataSize;
-
-				// copy sample data
+				pSound->m_DataSize = DataFile.GetDataSize(pItem->m_SoundData);
 				void *pData = DataFile.GetData(pItem->m_SoundData);
 				pSound->m_pData = malloc(pSound->m_DataSize);
 				mem_copy(pSound->m_pData, pData, pSound->m_DataSize);

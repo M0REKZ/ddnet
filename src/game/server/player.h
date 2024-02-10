@@ -8,6 +8,7 @@
 #include <engine/shared/protocol.h>
 
 #include <game/alloc.h>
+#include <game/server/save.h>
 
 #include "teeinfo.h"
 
@@ -63,6 +64,7 @@ public:
 
 	void KillCharacter(int Weapon = WEAPON_GAME, bool SendKillMsg = true);
 	CCharacter *GetCharacter();
+	const CCharacter *GetCharacter() const;
 
 	void SpectatePlayerName(const char *pName);
 
@@ -77,6 +79,8 @@ public:
 
 	// used for snapping to just update latency if the scoreboard is active
 	int m_aCurLatency[MAX_CLIENTS];
+
+	int m_SentSnaps = 0;
 
 	// used for spectator mode
 	int m_SpectatorID;
@@ -174,9 +178,9 @@ public:
 	void ProcessPause();
 	int Pause(int State, bool Force);
 	int ForcePause(int Time);
-	int IsPaused();
+	int IsPaused() const;
 
-	bool IsPlaying();
+	bool IsPlaying() const;
 	int64_t m_Last_KickVote;
 	int64_t m_Last_Team;
 	int m_ShowOthers;
@@ -221,7 +225,7 @@ public:
 	int m_SwapTargetsClientID; //Client ID of the swap target for the given player
 	bool m_BirthdayAnnounced;
 
-	vec2 LastTelePos;
+	CSaveTee m_LastTeleTee;
 };
 
 #endif

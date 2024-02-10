@@ -7,6 +7,7 @@
 #include "warning.h"
 
 #include <base/color.h>
+#include <base/system.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -57,10 +58,10 @@ struct SGraphicTile
 
 struct SGraphicTileTexureCoords
 {
-	vec3 m_TexCoordTopLeft;
-	vec3 m_TexCoordTopRight;
-	vec3 m_TexCoordBottomRight;
-	vec3 m_TexCoordBottomLeft;
+	ubvec4 m_TexCoordTopLeft;
+	ubvec4 m_TexCoordTopRight;
+	ubvec4 m_TexCoordBottomRight;
+	ubvec4 m_TexCoordBottomLeft;
 };
 
 class CImageInfo
@@ -232,7 +233,7 @@ typedef std::function<bool(uint32_t &Width, uint32_t &Height, CImageInfo::EImage
 
 class IGraphics : public IInterface
 {
-	MACRO_INTERFACE("graphics", 0)
+	MACRO_INTERFACE("graphics")
 protected:
 	int m_ScreenWidth;
 	int m_ScreenHeight;
@@ -246,9 +247,7 @@ public:
 		TEXLOAD_NO_COMPRESSION = 1 << 2,
 		TEXLOAD_TO_3D_TEXTURE = (1 << 3),
 		TEXLOAD_TO_2D_ARRAY_TEXTURE = (1 << 4),
-		TEXLOAD_TO_3D_TEXTURE_SINGLE_LAYER = (1 << 5),
-		TEXLOAD_TO_2D_ARRAY_TEXTURE_SINGLE_LAYER = (1 << 6),
-		TEXLOAD_NO_2D_TEXTURE = (1 << 7),
+		TEXLOAD_NO_2D_TEXTURE = (1 << 5),
 	};
 
 	class CTextureHandle
@@ -276,7 +275,7 @@ public:
 	int WindowHeight() const { return m_ScreenHeight / m_ScreenHiDPIScale; }
 
 	virtual void WarnPngliteIncompatibleImages(bool Warn) = 0;
-	virtual void SetWindowParams(int FullscreenMode, bool IsBorderless, bool AllowResizing) = 0;
+	virtual void SetWindowParams(int FullscreenMode, bool IsBorderless) = 0;
 	virtual bool SetWindowScreen(int Index) = 0;
 	virtual bool SetVSync(bool State) = 0;
 	virtual bool SetMultiSampling(uint32_t ReqMultiSamplingCount, uint32_t &MultiSamplingCountBackend) = 0;
@@ -322,7 +321,7 @@ public:
 
 	virtual const TTWGraphicsGPUList &GetGPUs() const = 0;
 
-	virtual int LoadPNG(CImageInfo *pImg, const char *pFilename, int StorageType) = 0;
+	virtual bool LoadPNG(CImageInfo *pImg, const char *pFilename, int StorageType) = 0;
 	virtual void FreePNG(CImageInfo *pImg) = 0;
 
 	virtual bool CheckImageDivisibility(const char *pFileName, CImageInfo &Img, int DivX, int DivY, bool AllowResize) = 0;
@@ -336,6 +335,7 @@ public:
 
 	virtual int UnloadTexture(CTextureHandle *pIndex) = 0;
 	virtual CTextureHandle LoadTextureRaw(size_t Width, size_t Height, CImageInfo::EImageFormat Format, const void *pData, int Flags, const char *pTexName = nullptr) = 0;
+	virtual CTextureHandle LoadTextureRawMove(size_t Width, size_t Height, CImageInfo::EImageFormat Format, void *pData, int Flags, const char *pTexName = nullptr) = 0;
 	virtual int LoadTextureRawSub(CTextureHandle TextureID, int x, int y, size_t Width, size_t Height, CImageInfo::EImageFormat Format, const void *pData) = 0;
 	virtual CTextureHandle LoadTexture(const char *pFilename, int StorageType, int Flags = 0) = 0;
 	virtual CTextureHandle NullTexture() const = 0;
@@ -357,8 +357,7 @@ public:
 
 	// specific render functions
 	virtual void RenderTileLayer(int BufferContainerIndex, const ColorRGBA &Color, char **pOffsets, unsigned int *pIndicedVertexDrawNum, size_t NumIndicesOffset) = 0;
-	virtual void RenderBorderTiles(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Dir, int JumpIndex, unsigned int DrawNum) = 0;
-	virtual void RenderBorderTileLines(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Dir, unsigned int IndexDrawNum, unsigned int RedrawNum) = 0;
+	virtual void RenderBorderTiles(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Scale, uint32_t DrawNum) = 0;
 	virtual void RenderQuadLayer(int BufferContainerIndex, SQuadRenderInfo *pQuadInfo, size_t QuadNum, int QuadOffset) = 0;
 	virtual void RenderText(int BufferContainerIndex, int TextQuadNum, int TextureSize, int TextureTextIndex, int TextureTextOutlineIndex, const ColorRGBA &TextColor, const ColorRGBA &TextOutlineColor) = 0;
 
@@ -387,7 +386,8 @@ public:
 	virtual bool IsQuadBufferingEnabled() = 0;
 	virtual bool IsTextBufferingEnabled() = 0;
 	virtual bool IsQuadContainerBufferingEnabled() = 0;
-	virtual bool HasTextureArrays() = 0;
+	virtual bool Uses2DTextureArrays() = 0;
+	virtual bool HasTextureArraysSupport() = 0;
 
 	virtual const char *GetVendorString() = 0;
 	virtual const char *GetVersionString() = 0;
@@ -504,18 +504,29 @@ public:
 		CColorVertex() {}
 		CColorVertex(int i, float r, float g, float b, float a) :
 			m_Index(i), m_R(r), m_G(g), m_B(b), m_A(a) {}
+		CColorVertex(int i, ColorRGBA Color) :
+			m_Index(i), m_R(Color.r), m_G(Color.g), m_B(Color.b), m_A(Color.a) {}
 	};
-	virtual void SetColorVertex(const CColorVertex *pArray, int Num) = 0;
+	virtual void SetColorVertex(const CColorVertex *pArray, size_t Num) = 0;
 	virtual void SetColor(float r, float g, float b, float a) = 0;
 	virtual void SetColor(ColorRGBA Color) = 0;
 	virtual void SetColor4(ColorRGBA TopLeft, ColorRGBA TopRight, ColorRGBA BottomLeft, ColorRGBA BottomRight) = 0;
 	virtual void ChangeColorOfCurrentQuadVertices(float r, float g, float b, float a) = 0;
-	virtual void ChangeColorOfQuadVertices(int QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a) = 0;
+	virtual void ChangeColorOfQuadVertices(size_t QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a) = 0;
 
+	/**
+	 * Reads the color at the specified position from the backbuffer once,
+	 * after the next swap operation.
+	 *
+	 * @param Position The pixel position to read.
+	 * @param pColor Pointer that will receive the read pixel color.
+	 * The pointer must be valid until the next swap operation.
+	 */
+	virtual void ReadPixel(ivec2 Position, ColorRGBA *pColor) = 0;
 	virtual void TakeScreenshot(const char *pFilename) = 0;
 	virtual void TakeCustomScreenshot(const char *pFilename) = 0;
 	virtual int GetVideoModes(CVideoMode *pModes, int MaxModes, int Screen) = 0;
-
+	virtual void GetCurrentVideoMode(CVideoMode &CurMode, int Screen) = 0;
 	virtual void Swap() = 0;
 	virtual int GetNumScreens() const = 0;
 	virtual const char *GetScreenName(int Screen) const = 0;
@@ -549,7 +560,7 @@ protected:
 
 class IEngineGraphics : public IGraphics
 {
-	MACRO_INTERFACE("enginegraphics", 0)
+	MACRO_INTERFACE("enginegraphics")
 public:
 	virtual int Init() = 0;
 	virtual void Shutdown() override = 0;

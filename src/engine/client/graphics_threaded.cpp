@@ -2,6 +2,7 @@
 /* If you are missing that file, acquire a complete release at teeworlds.com.                */
 
 #include <base/detect.h>
+#include <base/log.h>
 #include <base/math.h>
 
 #if defined(CONF_FAMILY_UNIX)
@@ -289,10 +290,7 @@ void CGraphics_Threaded::FreeTextureIndex(CTextureHandle *pIndex)
 
 int CGraphics_Threaded::UnloadTexture(CTextureHandle *pIndex)
 {
-	if(pIndex->Id() == m_NullTexture.Id())
-		return 0;
-
-	if(!pIndex->IsValid())
+	if(pIndex->IsNullTexture() || !pIndex->IsValid())
 		return 0;
 
 	CCommandBuffer::SCommand_Texture_Destroy Cmd;
@@ -415,7 +413,7 @@ bool CGraphics_Threaded::IsSpriteTextureFullyTransparent(CImageInfo &FromImageIn
 	return IsImageSubFullyTransparent(FromImageInfo, x, y, w, h);
 }
 
-IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRaw(size_t Width, size_t Height, CImageInfo::EImageFormat Format, const void *pData, int Flags, const char *pTexName)
+static void LoadTextureAddWarning(size_t Width, size_t Height, int Flags, const char *pTexName, std::vector<SWarning> &vWarnings)
 {
 	if((Flags & IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE) != 0 || (Flags & IGraphics::TEXLOAD_TO_3D_TEXTURE) != 0)
 	{
@@ -423,30 +421,22 @@ IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRaw(size_t Width, size_
 		{
 			SWarning NewWarning;
 			char aText[128];
-			aText[0] = '\0';
-			if(pTexName)
-			{
-				str_format(aText, sizeof(aText), "\"%s\"", pTexName);
-			}
+			str_format(aText, sizeof(aText), "\"%s\"", pTexName ? pTexName : "(no name)");
 			str_format(NewWarning.m_aWarningMsg, sizeof(NewWarning.m_aWarningMsg), Localize("The width of texture %s is not divisible by %d, or the height is not divisible by %d, which might cause visual bugs."), aText, 16, 16);
-
-			m_vWarnings.emplace_back(NewWarning);
+			vWarnings.emplace_back(NewWarning);
 		}
 	}
+}
 
-	if(Width == 0 || Height == 0)
-		return IGraphics::CTextureHandle();
-
-	IGraphics::CTextureHandle TextureHandle = FindFreeTextureIndex();
-
+static CCommandBuffer::SCommand_Texture_Create LoadTextureCreateCommand(int TextureId, size_t Width, size_t Height, int Flags)
+{
 	CCommandBuffer::SCommand_Texture_Create Cmd;
-	Cmd.m_Slot = TextureHandle.Id();
+	Cmd.m_Slot = TextureId;
 	Cmd.m_Width = Width;
 	Cmd.m_Height = Height;
 	Cmd.m_Format = CCommandBuffer::TEXFORMAT_RGBA;
 	Cmd.m_StoreFormat = CCommandBuffer::TEXFORMAT_RGBA;
 
-	// flags
 	Cmd.m_Flags = 0;
 	if(Flags & IGraphics::TEXLOAD_NOMIPMAPS)
 		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_NOMIPMAPS;
@@ -454,21 +444,54 @@ IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRaw(size_t Width, size_
 		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_TO_2D_ARRAY_TEXTURE;
 	if((Flags & IGraphics::TEXLOAD_TO_3D_TEXTURE) != 0)
 		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_TO_3D_TEXTURE;
-	if((Flags & IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE_SINGLE_LAYER) != 0)
-		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_TO_2D_ARRAY_TEXTURE_SINGLE_LAYER;
-	if((Flags & IGraphics::TEXLOAD_TO_3D_TEXTURE_SINGLE_LAYER) != 0)
-		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_TO_3D_TEXTURE_SINGLE_LAYER;
 	if((Flags & IGraphics::TEXLOAD_NO_2D_TEXTURE) != 0)
 		Cmd.m_Flags |= CCommandBuffer::TEXFLAG_NO_2D_TEXTURE;
 
-	// copy texture data
+	return Cmd;
+}
+
+IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRaw(size_t Width, size_t Height, CImageInfo::EImageFormat Format, const void *pData, int Flags, const char *pTexName)
+{
+	LoadTextureAddWarning(Width, Height, Flags, pTexName, m_vWarnings);
+
+	if(Width == 0 || Height == 0)
+		return IGraphics::CTextureHandle();
+
+	IGraphics::CTextureHandle TextureHandle = FindFreeTextureIndex();
+	CCommandBuffer::SCommand_Texture_Create Cmd = LoadTextureCreateCommand(TextureHandle.Id(), Width, Height, Flags);
+
+	// Copy texture data and convert if necessary
 	const size_t MemSize = Width * Height * CImageInfo::PixelSize(CImageInfo::FORMAT_RGBA);
 	void *pTmpData = malloc(MemSize);
-	if(!ConvertToRGBA((uint8_t *)pTmpData, (const uint8_t *)pData, Width, Height, Format))
+	if(!ConvertToRGBA(static_cast<uint8_t *>(pTmpData), static_cast<const uint8_t *>(pData), Width, Height, Format))
 	{
-		dbg_msg("graphics", "converted image %s to RGBA, consider making its file format RGBA", pTexName ? pTexName : "(no name)");
+		dbg_msg("graphics", "converted image '%s' to RGBA, consider making its file format RGBA", pTexName ? pTexName : "(no name)");
 	}
 	Cmd.m_pData = pTmpData;
+
+	AddCmd(Cmd);
+
+	return TextureHandle;
+}
+
+IGraphics::CTextureHandle CGraphics_Threaded::LoadTextureRawMove(size_t Width, size_t Height, CImageInfo::EImageFormat Format, void *pData, int Flags, const char *pTexName)
+{
+	if(Format != CImageInfo::FORMAT_RGBA)
+	{
+		// Moving not possible, texture needs to be converted
+		return LoadTextureRaw(Width, Height, Format, pData, Flags, pTexName);
+	}
+
+	LoadTextureAddWarning(Width, Height, Flags, pTexName, m_vWarnings);
+
+	if(Width == 0 || Height == 0)
+		return IGraphics::CTextureHandle();
+
+	IGraphics::CTextureHandle TextureHandle = FindFreeTextureIndex();
+	CCommandBuffer::SCommand_Texture_Create Cmd = LoadTextureCreateCommand(TextureHandle.Id(), Width, Height, Flags);
+
+	Cmd.m_pData = pData;
+
 	AddCmd(Cmd);
 
 	return TextureHandle;
@@ -482,8 +505,7 @@ IGraphics::CTextureHandle CGraphics_Threaded::LoadTexture(const char *pFilename,
 	CImageInfo Img;
 	if(LoadPNG(&Img, pFilename, StorageType))
 	{
-		CTextureHandle ID = LoadTextureRaw(Img.m_Width, Img.m_Height, Img.m_Format, Img.m_pData, Flags, pFilename);
-		FreePNG(&Img);
+		CTextureHandle ID = LoadTextureRawMove(Img.m_Width, Img.m_Height, Img.m_Format, Img.m_pData, Flags, pFilename);
 		if(ID.IsValid())
 		{
 			if(g_Config.m_Debug)
@@ -555,14 +577,20 @@ bool CGraphics_Threaded::UpdateTextTexture(CTextureHandle TextureID, int x, int 
 	return true;
 }
 
-int CGraphics_Threaded::LoadPNG(CImageInfo *pImg, const char *pFilename, int StorageType)
+bool CGraphics_Threaded::LoadPNG(CImageInfo *pImg, const char *pFilename, int StorageType)
 {
 	char aCompleteFilename[IO_MAX_PATH_LENGTH];
 	IOHANDLE File = m_pStorage->OpenFile(pFilename, IOFLAG_READ, StorageType, aCompleteFilename, sizeof(aCompleteFilename));
 	if(File)
 	{
 		io_seek(File, 0, IOSEEK_END);
-		unsigned int FileSize = io_tell(File);
+		long int FileSize = io_tell(File);
+		if(FileSize <= 0)
+		{
+			io_close(File);
+			log_error("game/png", "failed to get file size (%ld). filename='%s'", FileSize, pFilename);
+			return false;
+		}
 		io_seek(File, 0, IOSEEK_START);
 
 		TImageByteBuffer ByteBuffer;
@@ -578,17 +606,17 @@ int CGraphics_Threaded::LoadPNG(CImageInfo *pImg, const char *pFilename, int Sto
 		int PngliteIncompatible;
 		if(::LoadPNG(ImageByteBuffer, pFilename, PngliteIncompatible, pImg->m_Width, pImg->m_Height, pImgBuffer, ImageFormat))
 		{
-			pImg->m_pData = pImgBuffer;
-
-			if(ImageFormat == IMAGE_FORMAT_RGB) // ignore_convention
+			if(ImageFormat == IMAGE_FORMAT_RGB)
 				pImg->m_Format = CImageInfo::FORMAT_RGB;
-			else if(ImageFormat == IMAGE_FORMAT_RGBA) // ignore_convention
+			else if(ImageFormat == IMAGE_FORMAT_RGBA)
 				pImg->m_Format = CImageInfo::FORMAT_RGBA;
 			else
 			{
 				free(pImgBuffer);
-				return 0;
+				log_error("game/png", "image had unsupported image format. filename='%s' format='%d'", pFilename, (int)ImageFormat);
+				return false;
 			}
+			pImg->m_pData = pImgBuffer;
 
 			if(m_WarnPngliteIncompatibleImages && PngliteIncompatible != 0)
 			{
@@ -616,17 +644,17 @@ int CGraphics_Threaded::LoadPNG(CImageInfo *pImg, const char *pFilename, int Sto
 		}
 		else
 		{
-			dbg_msg("game/png", "image had unsupported image format. filename='%s'", pFilename);
-			return 0;
+			log_error("game/png", "failed to load file. filename='%s'", pFilename);
+			return false;
 		}
 	}
 	else
 	{
-		dbg_msg("game/png", "failed to open file. filename='%s'", pFilename);
-		return 0;
+		log_error("game/png", "failed to open file. filename='%s'", pFilename);
+		return false;
 	}
 
-	return 1;
+	return true;
 }
 
 void CGraphics_Threaded::FreePNG(CImageInfo *pImg)
@@ -787,20 +815,21 @@ public:
 	}
 };
 
-bool CGraphics_Threaded::ScreenshotDirect()
+void CGraphics_Threaded::ScreenshotDirect(bool *pSwapped)
 {
-	// add swap command
-	CImageInfo Image;
-	mem_zero(&Image, sizeof(Image));
+	if(!m_DoScreenshot)
+		return;
+	m_DoScreenshot = false;
+	if(!WindowActive())
+		return;
 
-	bool DidSwap = false;
+	CImageInfo Image;
 
 	CCommandBuffer::SCommand_TrySwapAndScreenshot Cmd;
 	Cmd.m_pImage = &Image;
-	Cmd.m_pSwapped = &DidSwap;
+	Cmd.m_pSwapped = pSwapped;
 	AddCmd(Cmd);
 
-	// kick the buffer and wait for the result
 	KickCommandBuffer();
 	WaitForIdle();
 
@@ -808,8 +837,6 @@ bool CGraphics_Threaded::ScreenshotDirect()
 	{
 		m_pEngine->AddJob(std::make_shared<CScreenshotSaveJob>(m_pStorage, m_pConsole, m_aScreenshotName, Image.m_Width, Image.m_Height, Image.m_pData));
 	}
-
-	return DidSwap;
 }
 
 void CGraphics_Threaded::TextureSet(CTextureHandle TextureID)
@@ -895,49 +922,36 @@ void CGraphics_Threaded::QuadsSetRotation(float Angle)
 	m_Rotation = Angle;
 }
 
-inline void clampf(float &Value, float Min, float Max)
+static unsigned char NormalizeColorComponent(float ColorComponent)
 {
-	if(Value > Max)
-		Value = Max;
-	else if(Value < Min)
-		Value = Min;
+	return (unsigned char)(clamp(ColorComponent, 0.0f, 1.0f) * 255.0f + 0.5f); // +0.5f to round to nearest
 }
 
-void CGraphics_Threaded::SetColorVertex(const CColorVertex *pArray, int Num)
+void CGraphics_Threaded::SetColorVertex(const CColorVertex *pArray, size_t Num)
 {
 	dbg_assert(m_Drawing != 0, "called Graphics()->SetColorVertex without begin");
 
-	for(int i = 0; i < Num; ++i)
+	for(size_t i = 0; i < Num; ++i)
 	{
-		float r = pArray[i].m_R, g = pArray[i].m_G, b = pArray[i].m_B, a = pArray[i].m_A;
-		clampf(r, 0.f, 1.f);
-		clampf(g, 0.f, 1.f);
-		clampf(b, 0.f, 1.f);
-		clampf(a, 0.f, 1.f);
-		m_aColor[pArray[i].m_Index].r = (unsigned char)(r * 255.f);
-		m_aColor[pArray[i].m_Index].g = (unsigned char)(g * 255.f);
-		m_aColor[pArray[i].m_Index].b = (unsigned char)(b * 255.f);
-		m_aColor[pArray[i].m_Index].a = (unsigned char)(a * 255.f);
+		const CColorVertex &Vertex = pArray[i];
+		CCommandBuffer::SColor &Color = m_aColor[Vertex.m_Index];
+		Color.r = NormalizeColorComponent(Vertex.m_R);
+		Color.g = NormalizeColorComponent(Vertex.m_G);
+		Color.b = NormalizeColorComponent(Vertex.m_B);
+		Color.a = NormalizeColorComponent(Vertex.m_A);
 	}
 }
 
 void CGraphics_Threaded::SetColor(float r, float g, float b, float a)
 {
-	clampf(r, 0.f, 1.f);
-	clampf(g, 0.f, 1.f);
-	clampf(b, 0.f, 1.f);
-	clampf(a, 0.f, 1.f);
-	r *= 255.f;
-	g *= 255.f;
-	b *= 255.f;
-	a *= 255.f;
-
-	for(auto &Color : m_aColor)
+	CCommandBuffer::SColor NewColor;
+	NewColor.r = NormalizeColorComponent(r);
+	NewColor.g = NormalizeColorComponent(g);
+	NewColor.b = NormalizeColorComponent(b);
+	NewColor.a = NormalizeColorComponent(a);
+	for(CCommandBuffer::SColor &Color : m_aColor)
 	{
-		Color.r = (unsigned char)(r);
-		Color.g = (unsigned char)(g);
-		Color.b = (unsigned char)(b);
-		Color.a = (unsigned char)(a);
+		Color = NewColor;
 	}
 }
 
@@ -948,25 +962,20 @@ void CGraphics_Threaded::SetColor(ColorRGBA Color)
 
 void CGraphics_Threaded::SetColor4(ColorRGBA TopLeft, ColorRGBA TopRight, ColorRGBA BottomLeft, ColorRGBA BottomRight)
 {
-	dbg_assert(m_Drawing != 0, "called Graphics()->SetColor without begin");
-	CColorVertex Array[4] = {
-		CColorVertex(0, TopLeft.r, TopLeft.g, TopLeft.b, TopLeft.a),
-		CColorVertex(1, TopRight.r, TopRight.g, TopRight.b, TopRight.a),
-		CColorVertex(2, BottomRight.r, BottomRight.g, BottomRight.b, BottomRight.a),
-		CColorVertex(3, BottomLeft.r, BottomLeft.g, BottomLeft.b, BottomLeft.a)};
-	SetColorVertex(Array, 4);
+	CColorVertex aArray[] = {
+		CColorVertex(0, TopLeft),
+		CColorVertex(1, TopRight),
+		CColorVertex(2, BottomRight),
+		CColorVertex(3, BottomLeft)};
+	SetColorVertex(aArray, std::size(aArray));
 }
 
 void CGraphics_Threaded::ChangeColorOfCurrentQuadVertices(float r, float g, float b, float a)
 {
-	clampf(r, 0.f, 1.f);
-	clampf(g, 0.f, 1.f);
-	clampf(b, 0.f, 1.f);
-	clampf(a, 0.f, 1.f);
-	m_aColor[0].r = (unsigned char)(r * 255.f);
-	m_aColor[0].g = (unsigned char)(g * 255.f);
-	m_aColor[0].b = (unsigned char)(b * 255.f);
-	m_aColor[0].a = (unsigned char)(a * 255.f);
+	m_aColor[0].r = NormalizeColorComponent(r);
+	m_aColor[0].g = NormalizeColorComponent(g);
+	m_aColor[0].b = NormalizeColorComponent(b);
+	m_aColor[0].a = NormalizeColorComponent(a);
 
 	for(int i = 0; i < m_NumVertices; ++i)
 	{
@@ -974,61 +983,13 @@ void CGraphics_Threaded::ChangeColorOfCurrentQuadVertices(float r, float g, floa
 	}
 }
 
-void CGraphics_Threaded::ChangeColorOfQuadVertices(int QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+void CGraphics_Threaded::ChangeColorOfQuadVertices(size_t QuadOffset, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
 {
-	if(g_Config.m_GfxQuadAsTriangle && !m_GLUseTrianglesAsQuad)
+	const CCommandBuffer::SColor Color(r, g, b, a);
+	const size_t VertNum = g_Config.m_GfxQuadAsTriangle && !m_GLUseTrianglesAsQuad ? 6 : 4;
+	for(size_t i = 0; i < VertNum; ++i)
 	{
-		m_aVertices[QuadOffset * 6].m_Color.r = r;
-		m_aVertices[QuadOffset * 6].m_Color.g = g;
-		m_aVertices[QuadOffset * 6].m_Color.b = b;
-		m_aVertices[QuadOffset * 6].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 6 + 1].m_Color.r = r;
-		m_aVertices[QuadOffset * 6 + 1].m_Color.g = g;
-		m_aVertices[QuadOffset * 6 + 1].m_Color.b = b;
-		m_aVertices[QuadOffset * 6 + 1].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 6 + 2].m_Color.r = r;
-		m_aVertices[QuadOffset * 6 + 2].m_Color.g = g;
-		m_aVertices[QuadOffset * 6 + 2].m_Color.b = b;
-		m_aVertices[QuadOffset * 6 + 2].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 6 + 3].m_Color.r = r;
-		m_aVertices[QuadOffset * 6 + 3].m_Color.g = g;
-		m_aVertices[QuadOffset * 6 + 3].m_Color.b = b;
-		m_aVertices[QuadOffset * 6 + 3].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 6 + 4].m_Color.r = r;
-		m_aVertices[QuadOffset * 6 + 4].m_Color.g = g;
-		m_aVertices[QuadOffset * 6 + 4].m_Color.b = b;
-		m_aVertices[QuadOffset * 6 + 4].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 6 + 5].m_Color.r = r;
-		m_aVertices[QuadOffset * 6 + 5].m_Color.g = g;
-		m_aVertices[QuadOffset * 6 + 5].m_Color.b = b;
-		m_aVertices[QuadOffset * 6 + 5].m_Color.a = a;
-	}
-	else
-	{
-		m_aVertices[QuadOffset * 4].m_Color.r = r;
-		m_aVertices[QuadOffset * 4].m_Color.g = g;
-		m_aVertices[QuadOffset * 4].m_Color.b = b;
-		m_aVertices[QuadOffset * 4].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 4 + 1].m_Color.r = r;
-		m_aVertices[QuadOffset * 4 + 1].m_Color.g = g;
-		m_aVertices[QuadOffset * 4 + 1].m_Color.b = b;
-		m_aVertices[QuadOffset * 4 + 1].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 4 + 2].m_Color.r = r;
-		m_aVertices[QuadOffset * 4 + 2].m_Color.g = g;
-		m_aVertices[QuadOffset * 4 + 2].m_Color.b = b;
-		m_aVertices[QuadOffset * 4 + 2].m_Color.a = a;
-
-		m_aVertices[QuadOffset * 4 + 3].m_Color.r = r;
-		m_aVertices[QuadOffset * 4 + 3].m_Color.g = g;
-		m_aVertices[QuadOffset * 4 + 3].m_Color.b = b;
-		m_aVertices[QuadOffset * 4 + 3].m_Color.a = a;
+		m_aVertices[QuadOffset * VertNum + i].m_Color = Color;
 	}
 }
 
@@ -1078,26 +1039,14 @@ void CGraphics_Threaded::QuadsDrawTL(const CQuadItem *pArray, int Num)
 
 void CGraphics_Threaded::QuadsTex3DDrawTL(const CQuadItem *pArray, int Num)
 {
-	int CurNumVert = m_NumVertices;
-
-	int VertNum = 0;
-	if(g_Config.m_GfxQuadAsTriangle && !m_GLUseTrianglesAsQuad)
-	{
-		VertNum = 6;
-	}
-	else
-	{
-		VertNum = 4;
-	}
+	const int VertNum = g_Config.m_GfxQuadAsTriangle && !m_GLUseTrianglesAsQuad ? 6 : 4;
+	const float CurIndex = Uses2DTextureArrays() ? m_CurIndex : (m_CurIndex + 0.5f) / 256.0f;
 
 	for(int i = 0; i < Num; ++i)
 	{
 		for(int n = 0; n < VertNum; ++n)
 		{
-			if(HasTextureArrays())
-				m_aVerticesTex3D[CurNumVert + VertNum * i + n].m_Tex.w = (float)m_CurIndex;
-			else
-				m_aVerticesTex3D[CurNumVert + VertNum * i + n].m_Tex.w = ((float)m_CurIndex + 0.5f) / 256.f;
+			m_aVerticesTex3D[m_NumVertices + VertNum * i + n].m_Tex.w = CurIndex;
 		}
 	}
 
@@ -1564,7 +1513,7 @@ void CGraphics_Threaded::RenderTileLayer(int BufferContainerIndex, const ColorRG
 	// todo max indices group check!!
 }
 
-void CGraphics_Threaded::RenderBorderTiles(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Dir, int JumpIndex, unsigned int DrawNum)
+void CGraphics_Threaded::RenderBorderTiles(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Scale, uint32_t DrawNum)
 {
 	if(DrawNum == 0)
 		return;
@@ -1576,32 +1525,9 @@ void CGraphics_Threaded::RenderBorderTiles(int BufferContainerIndex, const Color
 	Cmd.m_Color = Color;
 
 	Cmd.m_pIndicesOffset = pIndexBufferOffset;
-	Cmd.m_JumpIndex = JumpIndex;
 
 	Cmd.m_Offset = Offset;
-	Cmd.m_Dir = Dir;
-
-	AddCmd(Cmd);
-
-	m_pCommandBuffer->AddRenderCalls(1);
-}
-
-void CGraphics_Threaded::RenderBorderTileLines(int BufferContainerIndex, const ColorRGBA &Color, char *pIndexBufferOffset, const vec2 &Offset, const vec2 &Dir, unsigned int IndexDrawNum, unsigned int RedrawNum)
-{
-	if(IndexDrawNum == 0 || RedrawNum == 0)
-		return;
-	// Draw a border tile a lot of times
-	CCommandBuffer::SCommand_RenderBorderTileLine Cmd;
-	Cmd.m_State = m_State;
-	Cmd.m_IndexDrawNum = IndexDrawNum;
-	Cmd.m_DrawNum = RedrawNum;
-	Cmd.m_BufferContainerIndex = BufferContainerIndex;
-	Cmd.m_Color = Color;
-
-	Cmd.m_pIndicesOffset = pIndexBufferOffset;
-
-	Cmd.m_Offset = Offset;
-	Cmd.m_Dir = Dir;
+	Cmd.m_Scale = Scale;
 
 	AddCmd(Cmd);
 
@@ -2396,7 +2322,8 @@ int CGraphics_Threaded::IssueInit()
 		m_GLQuadBufferingEnabled = m_pBackend->HasQuadBuffering();
 		m_GLQuadContainerBufferingEnabled = m_pBackend->HasQuadContainerBuffering();
 		m_GLTextBufferingEnabled = (m_GLQuadContainerBufferingEnabled && m_pBackend->HasTextBuffering());
-		m_GLHasTextureArrays = m_pBackend->Has2DTextureArrays();
+		m_GLUses2DTextureArrays = m_pBackend->Uses2DTextureArrays();
+		m_GLHasTextureArraysSupport = m_pBackend->HasTextureArraysSupport();
 		m_ScreenHiDPIScale = m_ScreenWidth / (float)g_Config.m_GfxScreenWidth;
 		m_ScreenRefreshRate = g_Config.m_GfxScreenRefreshRate;
 	}
@@ -2630,7 +2557,7 @@ int CGraphics_Threaded::Init()
 				mem_copy(&aNullTextureData[(y * NullTextureDimension + x) * PixelSize], pColor, PixelSize);
 			}
 		}
-		const int TextureLoadFlags = HasTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
+		const int TextureLoadFlags = Uses2DTextureArrays() ? IGraphics::TEXLOAD_TO_2D_ARRAY_TEXTURE : IGraphics::TEXLOAD_TO_3D_TEXTURE;
 		m_NullTexture.Invalidate();
 		m_NullTexture = LoadTextureRaw(NullTextureDimension, NullTextureDimension, CImageInfo::FORMAT_RGBA, aNullTextureData, TextureLoadFlags);
 		dbg_assert(m_NullTexture.IsNullTexture(), "Null texture invalid");
@@ -2697,9 +2624,9 @@ void CGraphics_Threaded::WarnPngliteIncompatibleImages(bool Warn)
 	m_WarnPngliteIncompatibleImages = Warn;
 }
 
-void CGraphics_Threaded::SetWindowParams(int FullscreenMode, bool IsBorderless, bool AllowResizing)
+void CGraphics_Threaded::SetWindowParams(int FullscreenMode, bool IsBorderless)
 {
-	m_pBackend->SetWindowParams(FullscreenMode, IsBorderless, AllowResizing);
+	m_pBackend->SetWindowParams(FullscreenMode, IsBorderless);
 	CVideoMode CurMode;
 	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, g_Config.m_GfxScreen);
 	GotResized(CurMode.m_WindowWidth, CurMode.m_WindowHeight, CurMode.m_RefreshRate);
@@ -2720,6 +2647,7 @@ bool CGraphics_Threaded::SetWindowScreen(int Index)
 
 	for(auto &PropChangedListener : m_vPropChangeListeners)
 		PropChangedListener();
+
 	return true;
 }
 
@@ -2859,6 +2787,32 @@ void CGraphics_Threaded::NotifyWindow()
 	return m_pBackend->NotifyWindow();
 }
 
+void CGraphics_Threaded::ReadPixel(ivec2 Position, ColorRGBA *pColor)
+{
+	dbg_assert(Position.x >= 0 && Position.x < ScreenWidth(), "ReadPixel position x out of range");
+	dbg_assert(Position.y >= 0 && Position.y < ScreenHeight(), "ReadPixel position y out of range");
+
+	m_ReadPixelPosition = Position;
+	m_pReadPixelColor = pColor;
+}
+
+void CGraphics_Threaded::ReadPixelDirect(bool *pSwapped)
+{
+	if(m_pReadPixelColor == nullptr)
+		return;
+
+	CCommandBuffer::SCommand_TrySwapAndReadPixel Cmd;
+	Cmd.m_Position = m_ReadPixelPosition;
+	Cmd.m_pColor = m_pReadPixelColor;
+	Cmd.m_pSwapped = pSwapped;
+	AddCmd(Cmd);
+
+	KickCommandBuffer();
+	WaitForIdle();
+
+	m_pReadPixelColor = nullptr;
+}
+
 void CGraphics_Threaded::TakeScreenshot(const char *pFilename)
 {
 	// TODO: screenshot support
@@ -2885,23 +2839,16 @@ void CGraphics_Threaded::Swap()
 		}
 	}
 
-	bool TookScreenshotAndSwapped = false;
+	bool Swapped = false;
+	ScreenshotDirect(&Swapped);
+	ReadPixelDirect(&Swapped);
 
-	if(m_DoScreenshot)
+	if(!Swapped)
 	{
-		if(WindowActive())
-			TookScreenshotAndSwapped = ScreenshotDirect();
-		m_DoScreenshot = false;
-	}
-
-	if(!TookScreenshotAndSwapped)
-	{
-		// add swap command
 		CCommandBuffer::SCommand_Swap Cmd;
 		AddCmd(Cmd);
 	}
 
-	// kick the command buffer
 	KickCommandBuffer();
 	// TODO: Remove when https://github.com/libsdl-org/SDL/issues/5203 is fixed
 #ifdef CONF_PLATFORM_MACOS
@@ -3021,6 +2968,11 @@ int CGraphics_Threaded::GetVideoModes(CVideoMode *pModes, int MaxModes, int Scre
 	int NumModes = 0;
 	m_pBackend->GetVideoModes(pModes, MaxModes, &NumModes, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, Screen);
 	return NumModes;
+}
+
+void CGraphics_Threaded::GetCurrentVideoMode(CVideoMode &CurMode, int Screen)
+{
+	m_pBackend->GetCurrentVideoMode(CurMode, m_ScreenHiDPIScale, g_Config.m_GfxDesktopWidth, g_Config.m_GfxDesktopHeight, Screen);
 }
 
 extern IEngineGraphics *CreateEngineGraphicsThreaded()

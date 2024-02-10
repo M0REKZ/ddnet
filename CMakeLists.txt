@@ -325,6 +325,8 @@ if(NOT MSVC AND NOT HAIKU)
   add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wthread-safety)
   add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wthread-safety-negative)
   add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wsuggest-override)
+  add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wdynamic-class-memaccess) # clang
+  add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wclass-memaccess) # gcc
   add_linker_flag_if_supported(OUR_FLAGS_LINK -Wno-alloc-size-larger-than) # save.cpp with LTO
   # add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wdouble-promotion) # Many occurrences
   # add_cxx_compiler_flag_if_supported(OUR_FLAGS_OWN -Wnull-dereference) # Many occurrences
@@ -1115,6 +1117,7 @@ set(EXPECTED_DATA
   autoexec_server.cfg
   blob.png
   censorlist.txt
+  communityicons/none.png
   console.png
   console_bar.png
   countryflags/AD.png
@@ -1389,6 +1392,7 @@ set(EXPECTED_DATA
   editor/background.png
   editor/checker.png
   editor/cursor.png
+  editor/cursor_resize.png
   editor/entities/DDNet.png
   editor/entities/FNG.png
   editor/entities/Race.png
@@ -1403,6 +1407,7 @@ set(EXPECTED_DATA
   editor/entities_clear/vanilla.png
   editor/front.png
   editor/speed_arrow.png
+  editor/speed_arrow_array.png
   editor/speedup.png
   editor/switch.png
   editor/tele.png
@@ -1540,6 +1545,7 @@ set(EXPECTED_DATA
   menuimages/play_game.png
   menuimages/settings.png
   particles.png
+  race_flag.png
   shader/pipeline.frag
   shader/pipeline.vert
   shader/prim.frag
@@ -1554,6 +1560,8 @@ set(EXPECTED_DATA
   shader/text.vert
   shader/tile.frag
   shader/tile.vert
+  shader/tile_border.frag
+  shader/tile_border.vert
   shader/vulkan/prim.frag
   shader/vulkan/prim.vert
   shader/vulkan/prim3d.frag
@@ -1568,6 +1576,8 @@ set(EXPECTED_DATA
   shader/vulkan/text.vert
   shader/vulkan/tile.frag
   shader/vulkan/tile.vert
+  shader/vulkan/tile_border.frag
+  shader/vulkan/tile_border.vert
   skins/PaladiN.png
   skins/antiantey.png
   skins/beast.png
@@ -1844,7 +1854,7 @@ set_src(BASE GLOB_RECURSE src/base
   hash_ctxt.h
   hash_libtomcrypt.cpp
   hash_openssl.cpp
-  lock_scope.h
+  lock.h
   log.cpp
   log.h
   logger.h
@@ -1875,11 +1885,13 @@ set_src(ENGINE_INTERFACE GLOB src/engine
   friends.h
   ghost.h
   graphics.h
+  http.h
   input.h
   kernel.h
   keys.h
   map.h
   message.h
+  notifications.h
   rust.h
   server.h
   serverbrowser.h
@@ -1984,8 +1996,6 @@ set_src(GAME_SHARED GLOB src/game
   alloc.h
   collision.cpp
   collision.h
-  ddracechat.h
-  ddracecommands.h
   gamecore.cpp
   gamecore.h
   layers.cpp
@@ -2005,10 +2015,11 @@ set_src(GAME_SHARED GLOB src/game
   teamscore.cpp
   teamscore.h
   tuning.h
-  variables.h
   version.h
   voting.h
 )
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "src/game/version.h")
+
 # A bit hacky, but these are needed to register all the UUIDs, even for stuff
 # that doesn't link game.
 set(ENGINE_UUID_SHARED
@@ -2150,6 +2161,7 @@ if(CLIENT)
     updater.h
     video.cpp
     video.h
+    warning.cpp
   )
   set_src(GAME_CLIENT GLOB_RECURSE src/game/client
     animstate.cpp
@@ -2188,10 +2200,10 @@ if(CLIENT)
     components/ghost.h
     components/hud.cpp
     components/hud.h
+    components/infomessages.cpp
+    components/infomessages.h
     components/items.cpp
     components/items.h
-    components/killmessages.cpp
-    components/killmessages.h
     components/mapimages.cpp
     components/mapimages.h
     components/maplayers.cpp
@@ -2278,13 +2290,25 @@ if(CLIENT)
     component.h
     editor.cpp
     editor.h
+    editor_action.h
+    editor_actions.cpp
+    editor_actions.h
+    editor_history.cpp
+    editor_history.h
     editor_object.cpp
     editor_object.h
+    editor_props.cpp
+    editor_server_settings.cpp
+    editor_server_settings.h
+    editor_trackers.cpp
+    editor_trackers.h
+    editor_ui.h
     explanations.cpp
     map_grid.cpp
     map_grid.h
     map_view.cpp
     map_view.h
+    mapitems.h
     mapitems/envelope.cpp
     mapitems/envelope.h
     mapitems/image.cpp
@@ -2497,6 +2521,8 @@ if(SERVER)
     server.h
     server_logger.cpp
     server_logger.h
+    snap_id_pool.cpp
+    snap_id_pool.h
     sql_string_helpers.cpp
     sql_string_helpers.h
     upnp.cpp
@@ -2535,6 +2561,8 @@ if(SERVER)
     gamecontroller.h
     gamemodes/DDRace.cpp
     gamemodes/DDRace.h
+    gamemodes/mod.cpp
+    gamemodes/mod.h
     gameworld.cpp
     gameworld.h
     player.cpp
@@ -2744,6 +2772,8 @@ if(GTEST_FOUND OR DOWNLOAD_GTEST)
     jsonwriter.cpp
     linereader.cpp
     mapbugs.cpp
+    math.cpp
+    memory.cpp
     name_ban.cpp
     net.cpp
     netaddr.cpp
@@ -2761,6 +2791,7 @@ if(GTEST_FOUND OR DOWNLOAD_GTEST)
     test.cpp
     test.h
     thread.cpp
+    timestamp.cpp
     unix.cpp
     uuid.cpp
   )
@@ -3063,7 +3094,6 @@ if(NOT DEV)
   endif()
   install(TARGETS ${TARGETS_TOOLS} DESTINATION ${CMAKE_INSTALL_LIBDIR}/ddnet COMPONENT tools)
   install(FILES other/ddnet.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications COMPONENT client)
-  install(FILES other/ddnet.appdata.xml DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo COMPONENT client)
   foreach(SIZE 16 32 48 256)
     install(FILES other/icons/DDNet_${SIZE}x${SIZE}x32.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}x${SIZE}/apps RENAME ddnet.png COMPONENT client)
     install(FILES other/icons/DDNet-Server_${SIZE}x${SIZE}x32.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/${SIZE}x${SIZE}/apps RENAME ddnet-server.png COMPONENT server)

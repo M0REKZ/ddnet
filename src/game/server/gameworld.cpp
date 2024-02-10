@@ -349,7 +349,6 @@ std::vector<CCharacter *> CGameWorld::IntersectedCharacters(vec2 Pos0, vec2 Pos1
 			float Len = distance(pChr->m_Pos, IntersectPos);
 			if(Len < pChr->m_ProximityRadius + Radius)
 			{
-				pChr->m_Intersection = IntersectPos;
 				vpCharacters.push_back(pChr);
 			}
 		}
@@ -362,12 +361,9 @@ void CGameWorld::ReleaseHooked(int ClientID)
 	CCharacter *pChr = (CCharacter *)CGameWorld::FindFirst(CGameWorld::ENTTYPE_CHARACTER);
 	for(; pChr; pChr = (CCharacter *)pChr->TypeNext())
 	{
-		CCharacterCore *pCore = pChr->Core();
-		if(pCore->HookedPlayer() == ClientID && !pChr->IsSuper())
+		if(pChr->Core()->HookedPlayer() == ClientID && !pChr->IsSuper())
 		{
-			pCore->SetHookedPlayer(-1);
-			pCore->m_TriggeredEvents |= COREEVENT_HOOK_RETRACT;
-			pCore->m_HookState = HOOK_RETRACTED;
+			pChr->ReleaseHook();
 		}
 	}
 }

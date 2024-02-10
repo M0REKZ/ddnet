@@ -83,8 +83,7 @@ bool CCharacter::Spawn(CPlayer *pPlayer, vec2 Pos)
 
 	m_ReckoningTick = 0;
 	m_SendCore = CCharacterCore();
-	m_ReckoningCore = m_Core;
-	m_ReckoningCore.SetCoreWorld(nullptr, Collision(), nullptr);
+	m_ReckoningCore = CCharacterCore();
 
 	GameServer()->m_World.InsertEntity(this);
 	m_Alive = true;
@@ -263,7 +262,7 @@ void CCharacter::HandleNinja()
 		Collision()->MoveBox(&m_Core.m_Pos, &m_Core.m_Vel, vec2(GetProximityRadius(), GetProximityRadius()), GroundElasticity);
 
 		// reset velocity so the client doesn't predict stuff
-		m_Core.m_Vel = vec2(0.f, 0.f);
+		ResetVelocity();
 
 		// check if we Hit anything along the way
 		{
@@ -526,7 +525,7 @@ void CCharacter::FireWeapon()
 				MouseTarget //InitDir
 			);
 
-			GameServer()->CreateSound(m_Pos, SOUND_GUN_FIRE, TeamMask());
+			GameServer()->CreateSound(m_Pos, SOUND_GUN_FIRE, TeamMask()); // NOLINT(clang-analyzer-unix.Malloc)
 		}
 	}
 	break;
@@ -540,7 +539,7 @@ void CCharacter::FireWeapon()
 			LaserReach = TuningList()[m_TuneZone].m_LaserReach;
 
 		new CLaser(&GameServer()->m_World, m_Pos, Direction, LaserReach, m_pPlayer->GetCID(), WEAPON_SHOTGUN);
-		GameServer()->CreateSound(m_Pos, SOUND_SHOTGUN_FIRE, TeamMask());
+		GameServer()->CreateSound(m_Pos, SOUND_SHOTGUN_FIRE, TeamMask()); // NOLINT(clang-analyzer-unix.Malloc)
 	}
 	break;
 
@@ -578,7 +577,7 @@ void CCharacter::FireWeapon()
 			LaserReach = TuningList()[m_TuneZone].m_LaserReach;
 
 		new CLaser(GameWorld(), m_Pos, Direction, LaserReach, m_pPlayer->GetCID(), WEAPON_LASER);
-		GameServer()->CreateSound(m_Pos, SOUND_LASER_FIRE, TeamMask());
+		GameServer()->CreateSound(m_Pos, SOUND_LASER_FIRE, TeamMask()); // NOLINT(clang-analyzer-unix.Malloc)
 	}
 	break;
 
@@ -699,11 +698,16 @@ void CCharacter::OnDirectInput(CNetObj_PlayerInput *pNewInput)
 	mem_copy(&m_LatestPrevInput, &m_LatestInput, sizeof(m_LatestInput));
 }
 
-void CCharacter::ResetHook()
+void CCharacter::ReleaseHook()
 {
 	m_Core.SetHookedPlayer(-1);
 	m_Core.m_HookState = HOOK_RETRACTED;
 	m_Core.m_TriggeredEvents |= COREEVENT_HOOK_RETRACT;
+}
+
+void CCharacter::ResetHook()
+{
+	ReleaseHook();
 	m_Core.m_HookPos = m_Core.m_Pos;
 }
 
@@ -735,8 +739,7 @@ void CCharacter::PreTick()
 	// set emote
 	if(m_EmoteStop < Server()->Tick())
 	{
-		m_EmoteType = m_pPlayer->GetDefaultEmote();
-		m_EmoteStop = -1;
+		SetEmote(m_pPlayer->GetDefaultEmote(), -1);
 	}
 
 	DDRaceTick();
@@ -790,6 +793,9 @@ void CCharacter::TickDeferred()
 {
 	// advance the dummy
 	{
+		CWorldCore TempWorld;
+		m_ReckoningCore.Init(&TempWorld, Collision(), &Teams()->m_Core, m_pTeleOuts);
+		m_ReckoningCore.m_Id = m_pPlayer->GetCID();
 		m_ReckoningCore.Tick(false);
 		m_ReckoningCore.Move();
 		m_ReckoningCore.Quantize();
@@ -878,8 +884,6 @@ void CCharacter::TickDeferred()
 			m_ReckoningTick = Server()->Tick();
 			m_SendCore = m_Core;
 			m_ReckoningCore = m_Core;
-			m_ReckoningCore.SetCoreWorld(nullptr, Collision(), nullptr);
-			m_ReckoningCore.m_Tuning = CTuningParams();
 			m_Core.m_Reset = false;
 		}
 	}
@@ -968,8 +972,7 @@ bool CCharacter::TakeDamage(vec2 Force, int Dmg, int From, int Weapon)
 {
 	if(Dmg)
 	{
-		m_EmoteType = EMOTE_PAIN;
-		m_EmoteStop = Server()->Tick() + 500 * Server()->TickSpeed() / 1000;
+		SetEmote(EMOTE_PAIN, Server()->Tick() + 500 * Server()->TickSpeed() / 1000);
 	}
 
 	vec2 Temp = m_Core.m_Vel + Force;
@@ -1060,7 +1063,7 @@ void CCharacter::SnapCharacter(int SnappingClient, int ID)
 
 	if(Emote == EMOTE_NORMAL)
 	{
-		if(250 - ((Server()->Tick() - m_LastAction) % (250)) < 5)
+		if(5 * Server()->TickSpeed() - ((Server()->Tick() - m_LastAction) % (5 * Server()->TickSpeed())) < 5)
 			Emote = EMOTE_BLINK;
 	}
 
@@ -1100,6 +1103,10 @@ void CCharacter::SnapCharacter(int SnappingClient, int ID)
 		{
 			pCharacter->m_Angle -= (int)(2.0f * pi * 256.0f);
 		}
+
+		// m_HookTick can be negative when using the hook_duration tune, which 0.7 clients
+		// will consider invalid. https://github.com/ddnet/ddnet/issues/3915
+		pCharacter->m_HookTick = maximum(0, pCharacter->m_HookTick);
 
 		pCharacter->m_Tick = Tick;
 		pCharacter->m_Emote = Emote;
@@ -1261,6 +1268,10 @@ void CCharacter::Snap(int SnappingClient)
 	if(Teams()->IsPractice(Team()))
 	{
 		pDDNetCharacter->m_Flags |= CHARACTERFLAG_PRACTICE_MODE;
+	}
+	if(Teams()->TeamLocked(Team()))
+	{
+		pDDNetCharacter->m_Flags |= CHARACTERFLAG_LOCK_MODE;
 	}
 	pDDNetCharacter->m_TargetX = m_Core.m_Input.m_TargetX;
 	pDDNetCharacter->m_TargetY = m_Core.m_Input.m_TargetY;
@@ -1638,7 +1649,7 @@ void CCharacter::HandleTiles(int Index)
 		m_Core.m_Jumped = 0;
 		m_Core.m_JumpedTotal = 0;
 	}
-	m_Core.m_Vel = ClampVel(m_MoveRestrictions, m_Core.m_Vel);
+	ApplyMoveRestrictions();
 
 	// handle switch tiles
 	if(Collision()->GetSwitchType(MapIndex) == TILE_SWITCHOPEN && Team() != TEAM_SUPER && Collision()->GetSwitchNumber(MapIndex) > 0)
@@ -2353,6 +2364,43 @@ void CCharacter::Rescue()
 CClientMask CCharacter::TeamMask()
 {
 	return Teams()->TeamMask(Team(), -1, GetPlayer()->GetCID());
+}
+
+void CCharacter::SetPosition(const vec2 &Position)
+{
+	m_Core.m_Pos = Position;
+}
+
+void CCharacter::Move(vec2 RelPos)
+{
+	m_Core.m_Pos += RelPos;
+}
+
+void CCharacter::ResetVelocity()
+{
+	m_Core.m_Vel = vec2(0, 0);
+}
+
+void CCharacter::SetVelocity(vec2 NewVelocity)
+{
+	m_Core.m_Vel = ClampVel(m_MoveRestrictions, NewVelocity);
+}
+
+// The method is needed only to reproduce 'shotgun bug' ddnet#5258
+// Use SetVelocity() instead.
+void CCharacter::SetRawVelocity(vec2 NewVelocity)
+{
+	m_Core.m_Vel = NewVelocity;
+}
+
+void CCharacter::AddVelocity(vec2 Addition)
+{
+	SetVelocity(m_Core.m_Vel + Addition);
+}
+
+void CCharacter::ApplyMoveRestrictions()
+{
+	m_Core.m_Vel = ClampVel(m_MoveRestrictions, m_Core.m_Vel);
 }
 
 void CCharacter::SwapClients(int Client1, int Client2)
