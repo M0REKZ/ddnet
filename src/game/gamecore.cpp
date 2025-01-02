@@ -11,6 +11,8 @@
 
 #include <limits>
 
+#include <stdio.h>
+
 const char *CTuningParams::ms_apNames[] =
 	{
 #define MACRO_TUNING_PARAM(Name, ScriptName, Value, Description) #ScriptName,
@@ -301,6 +303,8 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 	{
 		SetHookedPlayer(-1);
 		m_HookPos = m_Pos;
+		m_pHookedQuad = nullptr;
+		m_QuadHookedPos = vec2(0,0);
 	}
 	else if(m_HookState >= HOOK_RETRACT_START && m_HookState < HOOK_RETRACT_END)
 	{
@@ -331,9 +335,9 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 		bool GoingToRetract = false;
 		bool GoingThroughTele = false;
 		int teleNr = 0;
-		int Hit = m_pCollision->IntersectLineTeleHook(m_HookPos, NewPos, &NewPos, 0, &teleNr);
+		int Hit = m_pCollision->IntersectLineTeleHook(m_HookPos, NewPos, &NewPos, 0, &teleNr, &m_pHookedQuad);
 
-		if(Hit)
+		if(Hit && !m_pHookedQuad)
 		{
 			if(Hit == TILE_NOHOOK)
 				GoingToRetract = true;
@@ -341,6 +345,24 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 				GoingThroughTele = true;
 			else
 				GoingToHitGround = true;
+			m_Reset = true;
+		}
+		else if(m_pHookedQuad)
+		{
+			if(m_pHookedQuad->m_ColorEnvOffset == TILE_NOHOOK)
+			{
+				GoingToRetract = true;
+			}
+			else if(m_pHookedQuad->m_ColorEnvOffset == TILE_SOLID)
+			{
+				GoingToHitGround = true;
+				vec2 temppos;
+				float tempangle;
+				m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_pHookedQuad->m_PosEnvOffset / 1000.0),m_pHookedQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
+				m_QuadHookedPos = NewPos - (temppos + vec2(fx2f(m_pHookedQuad->m_aPoints[4].x),fx2f(m_pHookedQuad->m_aPoints[4].y)));
+				printf("NewPosx: %f,NewPosy: %f\n",NewPos.x,NewPos.y);
+			}
+			
 			m_Reset = true;
 		}
 
@@ -405,6 +427,15 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 
 	if(m_HookState == HOOK_GRABBED)
 	{
+		if(m_HookedPlayer == -1 && m_pHookedQuad)
+		{
+			vec2 temppos;
+			float tempangle;
+			m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_pHookedQuad->m_PosEnvOffset / 1000.0),m_pHookedQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
+			m_HookPos = temppos + vec2(fx2f(m_pHookedQuad->m_aPoints[4].x),fx2f(m_pHookedQuad->m_aPoints[4].y)) + m_QuadHookedPos;
+			printf("x: %f, y: %f\n",m_QuadHookedPos.x,m_QuadHookedPos.y);
+		}
+
 		if(m_HookedPlayer != -1 && m_pWorld)
 		{
 			CCharacterCore *pCharCore = m_pWorld->m_apCharacters[m_HookedPlayer];

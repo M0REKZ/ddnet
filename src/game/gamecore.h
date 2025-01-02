@@ -16,6 +16,7 @@
 
 class CCollision;
 class CTeamsCore;
+struct CQuad;
 
 class CTuneParam
 {
@@ -188,6 +189,9 @@ public:
 	vec2 m_HookTeleBase;
 	int m_HookTick;
 	int m_HookState;
+	CQuad* m_pHookedQuad;
+	vec2 m_QuadHookedPos;
+	vec2 m_QuadPosWhenHooked;
 	std::set<int> m_AttachedPlayers;
 	int HookedPlayer() const { return m_HookedPlayer; }
 	void SetHookedPlayer(int HookedPlayer);
