@@ -331,9 +331,11 @@ int CCollision::GetTile(int x, int y) const
 	return 0;
 }
 
-int CCollision::GetQuadIndex(int x, int y, CQuad **pOutQuad, int *StartNum) const
+int CCollision::GetQuadIndex(int x, int y, QuadData *pOutQuad, int *StartNum) const
 {
 	CQuad *pQuad = nullptr;
+	vec2 Pos(0, 0);
+	float Angle = 0.0f;
 	int Num;
 	if(StartNum)
 		Num = *StartNum;
@@ -341,16 +343,26 @@ int CCollision::GetQuadIndex(int x, int y, CQuad **pOutQuad, int *StartNum) cons
 		Num = 0;
 	while(true)
 	{
-		Num = GetQuadAt(x, y,&pQuad, Num);
+		Num = GetQuadAt(x, y,&pQuad, Num, &Pos, &Angle);
 		Num++;
 		if(!pQuad)
 			break;
 		if(pQuad->m_ColorEnvOffset >= TILE_SOLID && pQuad->m_ColorEnvOffset <= TILE_NOLASER)
 			if(pOutQuad)
-				*pOutQuad = pQuad;
+			{
+				pOutQuad->m_pQuad = pQuad;
+				pOutQuad->m_Pos = Pos;
+				pOutQuad->m_Angle = Angle;
+			}
 			if(StartNum)
 				*StartNum = Num;
 			return pQuad->m_ColorEnvOffset;
+	}
+	if(pOutQuad)
+	{
+		pOutQuad->m_pQuad = pQuad;
+		pOutQuad->m_Pos = Pos;
+		pOutQuad->m_Angle = Angle;
 	}
 	if(StartNum)
 		*StartNum = Num;
@@ -358,7 +370,7 @@ int CCollision::GetQuadIndex(int x, int y, CQuad **pOutQuad, int *StartNum) cons
 }
 
 // TODO: rewrite this smarter!
-int CCollision::IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, CQuad **pOutQuad) const
+int CCollision::IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, QuadData *pOutQuad) const
 {
 	float Distance = distance(Pos0, Pos1);
 	int End(Distance + 1);
@@ -389,7 +401,7 @@ int CCollision::IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *p
 	return 0;
 }
 
-int CCollision::IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr, CQuad **pOutQuad) const
+int CCollision::IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr, QuadData *pOutQuad) const
 {
 	float Distance = distance(Pos0, Pos1);
 	int End(Distance + 1);
@@ -449,7 +461,7 @@ int CCollision::IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision,
 	return 0;
 }
 
-int CCollision::IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr, CQuad **pOutQuad) const
+int CCollision::IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr, QuadData *pOutQuad) const
 {
 	float Distance = distance(Pos0, Pos1);
 	int End(Distance + 1);
@@ -633,9 +645,11 @@ int CCollision::IsSolid(int x, int y) const
 	return index == TILE_SOLID || index == TILE_NOHOOK;
 }
 
-int CCollision::IsSolidQuad(int x, int y, CQuad **pOutQuad, int *StartNum) const
+int CCollision::IsSolidQuad(int x, int y, QuadData *pOutQuad, int *StartNum) const
 {
 	CQuad *pQuad = nullptr;
+	vec2 Pos(0, 0);
+	float Angle = 0.f;
 	int Num;
 	if(StartNum)
 		Num = *StartNum;
@@ -643,18 +657,28 @@ int CCollision::IsSolidQuad(int x, int y, CQuad **pOutQuad, int *StartNum) const
 		Num = 0;
 	while(true)
 	{
-		Num = GetQuadAt(x, y,&pQuad, Num);
+		Num = GetQuadAt(x, y,&pQuad, Num, &Pos, &Angle);
 		Num++;
 		if(!pQuad)
 			break;
 		if(pQuad->m_ColorEnvOffset == TILE_SOLID || pQuad->m_ColorEnvOffset == TILE_NOHOOK)
 		{
 			if(pOutQuad)
-				*pOutQuad = pQuad;
+			{
+				pOutQuad->m_pQuad = pQuad;
+				pOutQuad->m_Pos = Pos;
+				pOutQuad->m_Angle = Angle;
+			}
 			if(StartNum)
 				*StartNum = Num;
 			return true;
 		}
+	}
+	if(pOutQuad)
+	{
+		pOutQuad->m_pQuad = pQuad;
+		pOutQuad->m_Pos = Pos;
+		pOutQuad->m_Angle = Angle;
 	}
 	if(StartNum)
 		*StartNum = Num;
@@ -1362,7 +1386,7 @@ void CCollision::Rotate(vec2 *pCenter, vec2 *pPoint, float Rotation) const
 	pPoint->y = (x * sinf(Rotation) + y * cosf(Rotation) + pCenter->y);
 }
 
-int CCollision::GetQuadAt(float x, float y, CQuad **pOut, int StartNum) const
+int CCollision::GetQuadAt(float x, float y, CQuad **pOut, int StartNum, vec2 *QuadCurPos, float *QuadCurAngle) const
 {
 
 	
@@ -1375,6 +1399,8 @@ int CCollision::GetQuadAt(float x, float y, CQuad **pOut, int StartNum) const
 	SAnimationTransformCache AnimationCache;
 			
 			CQuad *pQuads = (CQuad*) m_pLayers->Map()->GetDataSwapped(m_pQuadLayer->m_Data);
+			vec2 Pos(0.0f, 0.0f);
+			float Ang = 0.0f;
 			for(Num = StartNum; Num < m_pQuadLayer->m_NumQuads; Num++)
 			{
 				vec2 Position(0.0f, 0.0f);
@@ -1412,6 +1438,8 @@ int CCollision::GetQuadAt(float x, float y, CQuad **pOut, int StartNum) const
 				if(InsideQuad(p0, p1, p2, p3, vec2(x, y)))
 				{
 					pQuad = &pQuads[Num];
+					Pos = Position;
+					Ang = Angle;
 					break;
 				}
 			}
@@ -1419,6 +1447,10 @@ int CCollision::GetQuadAt(float x, float y, CQuad **pOut, int StartNum) const
 		
 		if(pOut)
 			*pOut = pQuad;
+		if(QuadCurPos)
+			*QuadCurPos = Pos;
+		if(QuadCurAngle)
+			*QuadCurAngle = Ang;
 	
 	
 	return Num;

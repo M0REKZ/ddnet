@@ -26,6 +26,12 @@ enum
 	CANTMOVE_UP = 1 << 2,
 	CANTMOVE_DOWN = 1 << 3,
 };
+struct QuadData
+{
+	CQuad *m_pQuad;
+	vec2 m_Pos;
+	float m_Angle;
+};
 
 vec2 ClampVel(int MoveRestriction, vec2 Vel);
 
@@ -42,14 +48,14 @@ public:
 	void Unload();
 	void FillAntibot(CAntibotMapData *pMapData) const;
 
-	bool CheckPoint(float x, float y, CQuad **pOutQuad = nullptr, int *StartNum = nullptr) const { return IsSolid(round_to_int(x), round_to_int(y)) || IsSolidQuad(round_to_int(x), round_to_int(y), pOutQuad, StartNum); }
-	bool CheckPoint(vec2 Pos, CQuad **pOutQuad = nullptr, int *StartNum = nullptr) const { return CheckPoint(Pos.x, Pos.y, pOutQuad, StartNum); }
+	bool CheckPoint(float x, float y, QuadData *pOutQuad = nullptr, int *StartNum = nullptr) const { return IsSolid(round_to_int(x), round_to_int(y)) || IsSolidQuad(round_to_int(x), round_to_int(y), pOutQuad, StartNum); }
+	bool CheckPoint(vec2 Pos, QuadData *pOutQuad = nullptr, int *StartNum = nullptr) const { return CheckPoint(Pos.x, Pos.y, pOutQuad, StartNum); }
 	int GetCollisionAt(float x, float y) const;
 	int GetWidth() const { return m_Width; }
 	int GetHeight() const { return m_Height; }
-	int IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, CQuad **pOutQuad = nullptr) const;
-	int IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr = nullptr, CQuad **pOutQuad = nullptr) const;
-	int IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr = nullptr, CQuad **pOutQuad = nullptr) const;
+	int IntersectLine(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, QuadData *pOutQuad = nullptr) const;
+	int IntersectLineTeleWeapon(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr = nullptr, QuadData *pOutQuad = nullptr) const;
+	int IntersectLineTeleHook(vec2 Pos0, vec2 Pos1, vec2 *pOutCollision, vec2 *pOutBeforeCollision, int *pTeleNr = nullptr, QuadData *pOutQuad = nullptr) const;
 	void MovePoint(vec2 *pInoutPos, vec2 *pInoutVel, float Elasticity, int *pBounces) const;
 	void MoveBox(vec2 *pInoutPos, vec2 *pInoutVel, vec2 Size, vec2 Elasticity, bool *pGrounded = nullptr) const;
 	bool TestBox(vec2 Pos, vec2 Size) const;
@@ -68,8 +74,10 @@ public:
 
 	//Quads
 	CMapItemLayerQuads *GetQuadHandle(const char* pName) const { return m_pQuadLayer; }
-	int GetQuadAt(float x, float y, CQuad **pOut = nullptr, int StartNum = 0) const;
-	int GetQuadAt(vec2 Pos, CQuad **pOut = nullptr, int StartNum = 0) const { return GetQuadAt(Pos.x, Pos.y, pOut, StartNum); }
+	int GetQuadAt(float x, float y, CQuad **pOut = nullptr, int StartNum = 0, vec2 *QuadCurPos = nullptr, float *QuadCurAngle = nullptr) const;
+	int GetQuadAt(vec2 Pos, CQuad **pOut = nullptr, int StartNum = 0, vec2 *QuadCurPos = nullptr, float *QuadCurAngle = nullptr) const { return GetQuadAt(Pos.x, Pos.y, pOut, StartNum, QuadCurPos, QuadCurAngle); }
+	int GetQuadAt(float x, float y, QuadData *pOut = nullptr, int StartNum = 0) const { return GetQuadAt(x, y, &pOut->m_pQuad, StartNum, &pOut->m_Pos, &pOut->m_Angle); }
+	int GetQuadAt(vec2 Pos, QuadData *pOut = nullptr, int StartNum = 0) const { return GetQuadAt(Pos.x, Pos.y, &pOut->m_pQuad, StartNum, &pOut->m_Pos, &pOut->m_Angle); }
 	void GetAnimationTransform(float GlobalTime, int Env, class CLayers* pLayers, vec2& Position, float& Angle) const;
 	double m_Time;
 	void SetTime(double Time) { m_Time = Time; }
@@ -86,8 +94,8 @@ public:
 		int PosEnvOffset = 0;
 	};
 
-	int IsSolidQuad(int x, int y, CQuad **pOutQuad = nullptr, int *StartNum = nullptr) const;
-	int GetQuadIndex(int x, int y, CQuad **pOutQuad = nullptr, int *StartNum = nullptr) const;
+	int IsSolidQuad(int x, int y, QuadData *pOutQuad = nullptr, int *StartNum = nullptr) const;
+	int GetQuadIndex(int x, int y, QuadData *pOutQuad = nullptr, int *StartNum = nullptr) const;
 
 	int GetMoveRestrictions(CALLBACK_SWITCHACTIVE pfnSwitchActive, void *pUser, vec2 Pos, float Distance = 18.0f, int OverrideCenterTileIndex = -1) const;
 	int GetMoveRestrictions(vec2 Pos, float Distance = 18.0f) const

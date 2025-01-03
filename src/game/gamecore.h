@@ -11,6 +11,7 @@
 
 #include <engine/shared/protocol.h>
 #include <game/generated/protocol.h>
+#include "collision.h"
 
 #include "prng.h"
 
@@ -183,15 +184,15 @@ public:
 	static constexpr vec2 PhysicalSizeVec2() { return vec2(28.0f, 28.0f); };
 	vec2 m_Pos;
 	vec2 m_Vel;
+	//QuadData m_StandingQuad;
 
 	vec2 m_HookPos;
 	vec2 m_HookDir;
 	vec2 m_HookTeleBase;
 	int m_HookTick;
 	int m_HookState;
-	CQuad* m_pHookedQuad;
+	QuadData m_HookedQuad;
 	vec2 m_QuadHookedPos;
-	vec2 m_QuadPosWhenHooked;
 	std::set<int> m_AttachedPlayers;
 	int HookedPlayer() const { return m_HookedPlayer; }
 	void SetHookedPlayer(int HookedPlayer);

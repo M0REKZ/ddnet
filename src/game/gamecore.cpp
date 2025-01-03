@@ -195,8 +195,28 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 	m_MoveRestrictions = m_pCollision->GetMoveRestrictions(UseInput ? IsSwitchActiveCb : 0, this, m_Pos);
 	m_TriggeredEvents = 0;
 
+	//QuadData StandingQuad2 = {nullptr, vec2(0,0), 0};
 	// get ground state
 	const bool Grounded = m_pCollision->CheckPoint(m_Pos.x + PhysicalSize() / 2, m_Pos.y + PhysicalSize() / 2 + 5) || m_pCollision->CheckPoint(m_Pos.x - PhysicalSize() / 2, m_Pos.y + PhysicalSize() / 2 + 5);
+	
+	printf("Grounded: %d\n", Grounded);
+
+	/*if(!m_StandingQuad.m_pQuad)
+	{
+		if(StandingQuad2.m_pQuad)
+		{
+			m_StandingQuad.m_pQuad = StandingQuad2.m_pQuad;
+			m_StandingQuad.m_Pos = StandingQuad2.m_Pos;
+			m_StandingQuad.m_Angle = StandingQuad2.m_Angle;
+		}
+		else
+		{
+			m_StandingQuad.m_pQuad = nullptr;
+			m_StandingQuad.m_Pos = vec2(0,0);
+			m_StandingQuad.m_Angle = 0;
+		}
+	}*/
+	
 	vec2 TargetDirection = normalize(vec2(m_Input.m_TargetX, m_Input.m_TargetY));
 
 	m_Vel.y += m_Tuning.m_Gravity;
@@ -303,7 +323,7 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 	{
 		SetHookedPlayer(-1);
 		m_HookPos = m_Pos;
-		m_pHookedQuad = nullptr;
+		m_HookedQuad = {nullptr, vec2(0,0), 0};
 		m_QuadHookedPos = vec2(0,0);
 	}
 	else if(m_HookState >= HOOK_RETRACT_START && m_HookState < HOOK_RETRACT_END)
@@ -335,9 +355,9 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 		bool GoingToRetract = false;
 		bool GoingThroughTele = false;
 		int teleNr = 0;
-		int Hit = m_pCollision->IntersectLineTeleHook(m_HookPos, NewPos, &NewPos, 0, &teleNr, &m_pHookedQuad);
+		int Hit = m_pCollision->IntersectLineTeleHook(m_HookPos, NewPos, &NewPos, 0, &teleNr, &m_HookedQuad);
 
-		if(Hit && !m_pHookedQuad)
+		if(Hit && !m_HookedQuad.m_pQuad)
 		{
 			if(Hit == TILE_NOHOOK)
 				GoingToRetract = true;
@@ -347,20 +367,16 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 				GoingToHitGround = true;
 			m_Reset = true;
 		}
-		else if(m_pHookedQuad)
+		else if(m_HookedQuad.m_pQuad)
 		{
-			if(m_pHookedQuad->m_ColorEnvOffset == TILE_NOHOOK)
+			if(m_HookedQuad.m_pQuad->m_ColorEnvOffset == TILE_NOHOOK)
 			{
 				GoingToRetract = true;
 			}
-			else if(m_pHookedQuad->m_ColorEnvOffset == TILE_SOLID)
+			else if(m_HookedQuad.m_pQuad->m_ColorEnvOffset == TILE_SOLID)
 			{
 				GoingToHitGround = true;
-				vec2 temppos;
-				float tempangle;
-				m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_pHookedQuad->m_PosEnvOffset / 1000.0),m_pHookedQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
-				m_QuadHookedPos = NewPos - (temppos + vec2(fx2f(m_pHookedQuad->m_aPoints[4].x),fx2f(m_pHookedQuad->m_aPoints[4].y)));
-				printf("NewPosx: %f,NewPosy: %f\n",NewPos.x,NewPos.y);
+				m_QuadHookedPos = NewPos - (m_HookedQuad.m_Pos + vec2(fx2f(m_HookedQuad.m_pQuad->m_aPoints[4].x),fx2f(m_HookedQuad.m_pQuad->m_aPoints[4].y)));
 			}
 			
 			m_Reset = true;
@@ -427,13 +443,12 @@ void CCharacterCore::Tick(bool UseInput, bool DoDeferredTick)
 
 	if(m_HookState == HOOK_GRABBED)
 	{
-		if(m_HookedPlayer == -1 && m_pHookedQuad)
+		if(m_HookedPlayer == -1 && m_HookedQuad.m_pQuad)
 		{
 			vec2 temppos;
 			float tempangle;
-			m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_pHookedQuad->m_PosEnvOffset / 1000.0),m_pHookedQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
-			m_HookPos = temppos + vec2(fx2f(m_pHookedQuad->m_aPoints[4].x),fx2f(m_pHookedQuad->m_aPoints[4].y)) + m_QuadHookedPos;
-			printf("x: %f, y: %f\n",m_QuadHookedPos.x,m_QuadHookedPos.y);
+			m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_HookedQuad.m_pQuad->m_PosEnvOffset / 1000.0),m_HookedQuad.m_pQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
+			m_HookPos = temppos + vec2(fx2f(m_HookedQuad.m_pQuad->m_aPoints[4].x),fx2f(m_HookedQuad.m_pQuad->m_aPoints[4].y)) + m_QuadHookedPos;
 		}
 
 		if(m_HookedPlayer != -1 && m_pWorld)
@@ -562,6 +577,20 @@ void CCharacterCore::TickDeferred()
 void CCharacterCore::Move()
 {
 	float RampValue = VelocityRamp(length(m_Vel) * 50, m_Tuning.m_VelrampStart, m_Tuning.m_VelrampRange, m_Tuning.m_VelrampCurvature);
+
+	/*if(m_StandingQuad.m_pQuad)
+	{
+		vec2 temppos;
+		float tempangle;
+		m_pCollision->GetAnimationTransform(m_pCollision->m_Time + (m_StandingQuad.m_pQuad->m_PosEnvOffset / 1000.0),m_StandingQuad.m_pQuad->m_PosEnv,(CLayers *)m_pCollision->Layers(), temppos, tempangle);
+		
+		if(m_StandingQuad.m_Pos.x != temppos.x)
+		{
+			m_Pos.x += temppos.x - m_StandingQuad.m_Pos.x;
+			m_StandingQuad.m_Pos = temppos;
+			m_StandingQuad.m_Angle = tempangle;
+		}
+	}*/
 
 	m_Vel.x = m_Vel.x * RampValue;
 
