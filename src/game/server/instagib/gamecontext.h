@@ -23,6 +23,8 @@ public:
 	// set by the config sv_display_score
 	EDisplayScore m_DisplayScore = EDisplayScore::ROUND_POINTS;
 
+	CRollback m_Rollback;
+
 	// bang commands
 	void BangCommandVote(int ClientId, const char *pCommand, const char *pDesc);
 	void ComCallShuffleVote(int ClientId);
@@ -39,6 +41,7 @@ public:
 	void ShowCurrentInstagibConfigsMotd(int ClientId = -1, bool Force = false) const;
 	void PlayerReadyStateBroadcast();
 	void SendBroadcastSix(const char *pText, bool Important = true);
+	virtual void SetPlayerLastAckedSnapshot(int ClientId, int Tick) override; //ddnet-insta ICTFX rollback
 	enum
 	{
 		MAX_LINES = 25,
@@ -102,6 +105,7 @@ public:
 	static void ConTopFastcaps(IConsole::IResult *pResult, void *pUserData);
 	static void ConTopNumCaps(IConsole::IResult *pResult, void *pUserData);
 	static void ConRankFlagCaptures(IConsole::IResult *pResult, void *pUserData);
+	static void ConRollback(IConsole::IResult *pResult, void *pUserData);
 
 #define MACRO_ADD_COLUMN(name, sql_name, sql_type, bind_type, default, merge_method) ;
 #define MACRO_RANK_COLUMN(name, sql_name, display_name, order_by) \

@@ -16,6 +16,8 @@ class CCharacter : public CEntity
 	friend class CGameControllerCTF;
 	friend class CGameControllerBaseFng;
 
+#define ROLLBACK_POSITION_HISTORY SERVER_TICK_SPEED //ddnet-insta ICTFX rollback
+
 public:
 	// ddnet-insta
 	/*
@@ -61,6 +63,13 @@ public:
 
 	const class CPlayer *GetPlayer() const { return m_pPlayer; }
 	int HookedPlayer() const { return m_Core.HookedPlayer(); }
+
+	//ddnet-insta ICTFX rollback: character position history
+	struct
+	{
+		vec2 m_Position = vec2(0, 0);
+		bool m_Valid = false;
+	} m_Positions[ROLLBACK_POSITION_HISTORY];
 
 private:
 	// players skin changes colors

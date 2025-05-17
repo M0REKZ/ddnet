@@ -99,6 +99,12 @@ void CPlayer::InstagibTick()
 		m_FastcapQueryResult = nullptr;
 	}
 
+	//Dont keep rollback enabled if server does not allow it
+	if(!g_Config.m_SvAllowRollback)
+	{
+		m_RollbackEnabled = false;
+	}
+
 	RainbowTick();
 }
 

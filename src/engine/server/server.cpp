@@ -1821,6 +1821,7 @@ void CServer::ProcessClientPacket(CNetChunk *pPacket)
 				IntendedTick = Tick() + 1;
 
 			pInput->m_GameTick = IntendedTick;
+			pInput->m_AckedTick = LastAckedSnapshot; //ddnet-insta ICTFX rollback
 
 			for(int i = 0; i < Size / 4; i++)
 			{
@@ -3135,6 +3136,7 @@ int CServer::Run()
 					{
 						if(Input.m_GameTick == Tick())
 						{
+							GameServer()->SetPlayerLastAckedSnapshot(c, Input.m_AckedTick); //ddnet-insta ICTFX rollback
 							GameServer()->OnClientPredictedInput(c, Input.m_aData);
 							ClientHadInput = true;
 							break;

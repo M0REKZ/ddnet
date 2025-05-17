@@ -278,6 +278,11 @@ public:
 	// to figure out which players score the least
 	int m_ScoreStartTick = 0;
 
+	// ICTFX rollback for this player
+	bool m_RollbackEnabled = false;
+	// ICTFX rollback LastAckedSnapshot
+	int m_LastAckedSnapshot = -1;
+
 #ifndef IN_CLASS_PLAYER
 };
 #endif

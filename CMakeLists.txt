@@ -2716,10 +2716,12 @@ if(SERVER)
     ddracecommands.cpp
     entities/character.cpp
     entities/character.h
+    entities/ddnet_pvp/pvp_laser.cpp
+    entities/ddnet_pvp/pvp_laser.h
+    entities/ddnet_pvp/pvp_projectile.cpp
+    entities/ddnet_pvp/pvp_projectile.h
     entities/ddnet_pvp/vanilla_pickup.cpp
     entities/ddnet_pvp/vanilla_pickup.h
-    entities/ddnet_pvp/vanilla_projectile.cpp
-    entities/ddnet_pvp/vanilla_projectile.h
     entities/door.cpp
     entities/door.h
     entities/dragger.cpp
@@ -2828,6 +2830,7 @@ if(SERVER)
     instagib/extra_columns.h
     instagib/gamecontext.h
     instagib/gamecontext/bangcommands.cpp
+    instagib/gamecontext/gamecontext.cpp
     instagib/gamecontroller.cpp
     instagib/gamecontroller.h
     instagib/gamelogic.cpp
@@ -2838,6 +2841,8 @@ if(SERVER)
     instagib/rcon_commands.cpp
     instagib/rcon_commands.h
     instagib/rcon_configs.cpp
+    instagib/rollback.cpp
+    instagib/rollback.h
     instagib/round_stats.cpp
     instagib/round_stats_ascii.cpp
     instagib/round_stats_csv.cpp

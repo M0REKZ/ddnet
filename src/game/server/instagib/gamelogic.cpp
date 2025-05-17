@@ -22,6 +22,8 @@ void CGameContext::OnInitInstagib()
 
 	m_pHttp = Kernel()->RequestInterface<IHttp>();
 
+	m_Rollback.Init(this);
+
 	m_pController->OnInit();
 	m_pController->OnRoundStart();
 }
